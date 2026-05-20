@@ -1,0 +1,15 @@
+{
+  "name": "autonews-ai-deploy",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "pm2 start ecosystem.config.cjs",
+    "stop": "pm2 stop ecosystem.config.cjs",
+    "restart": "pm2 restart ecosystem.config.cjs",
+    "logs": "pm2 logs",
+    "status": "pm2 status",
+    "setup": "cd api && npm install --omit=dev && npx prisma generate && cd ..",
+    "seed": "cd api && npx tsx prisma/seed.ts && cd ..",
+    "migrate": "cd api && npx prisma migrate deploy && cd .."
+  }
+}

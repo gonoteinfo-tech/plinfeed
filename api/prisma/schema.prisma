@@ -1,0 +1,396 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  EDITOR
+  WRITER
+  CLIENT
+}
+
+enum SiteStatus {
+  CONNECTED
+  WARNING
+  DISCONNECTED
+}
+
+enum PublishMode {
+  AUTO
+  DRAFT
+  REVIEW
+}
+
+enum FeedStatus {
+  ACTIVE
+  INACTIVE
+  PAUSED
+}
+
+enum ScheduleFrequency {
+  MINUTES
+  FIXED_TIME
+  DAILY
+  WEEKLY
+}
+
+enum PostStatus {
+  RAW
+  GENERATING
+  DRAFT
+  PENDING_REVIEW
+  PUBLISHED
+  ERROR
+}
+
+enum LogType {
+  INFO
+  SUCCESS
+  WARNING
+  ERROR
+}
+
+enum AiProvider {
+  OPENAI
+  GEMINI
+  CUSTOM
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAUSED
+  EXPIRED
+  CANCELED
+}
+
+model User {
+  id             String         @id @default(cuid())
+  name           String
+  email          String         @unique
+  passwordHash   String
+  avatarUrl      String?
+  defaultRole    UserRole       @default(ADMIN)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  memberships    TenantMember[]
+  accessLogs     AccessLog[]
+  subscriptions  Subscription[]
+  socialConnections SocialConnection[]
+}
+
+model Tenant {
+  id             String           @id @default(cuid())
+  name           String
+  slug           String           @unique
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  members        TenantMember[]
+  sites          Site[]
+  feeds          Feed[]
+  posts          Post[]
+  rawNews        RawNews[]
+  schedules      Schedule[]
+  prompts        PromptTemplate[]
+  aiConfigs      AiConfig[]
+  logs           ExecutionLog[]
+  subscriptions  Subscription[]
+  socialConnections SocialConnection[]
+}
+
+model SocialConnection {
+  id                   String   @id @default(cuid())
+  tenantId             String
+  userId               String?
+  provider             String
+  providerUserId       String
+  name                 String?
+  email                String?
+  accessTokenEncrypted String
+  tokenType            String?
+  expiresAt            DateTime?
+  scopes               String[]
+  metadata             Json?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  tenant               Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user                 User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, provider, providerUserId])
+  @@index([tenantId, provider])
+  @@index([userId])
+}
+
+model TenantMember {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String
+  role      UserRole @default(ADMIN)
+  createdAt DateTime @default(now())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId])
+  @@index([userId])
+}
+
+model Site {
+  id                    String          @id @default(cuid())
+  tenantId              String
+  name                  String
+  wordpressUrl          String
+  apiUsername           String
+  encryptedApiSecret    String
+  status                SiteStatus      @default(DISCONNECTED)
+  defaultCategory       String?
+  defaultAuthor         String?
+  publishMode           PublishMode     @default(DRAFT)
+  adsenseCode           String?
+  adsBeforeContent      Boolean         @default(false)
+  adsMiddleContent      Boolean         @default(false)
+  adsAfterContent       Boolean         @default(false)
+  adsEnabled            Boolean         @default(false)
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+  tenant                Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  feeds                 Feed[]
+  posts                 Post[]
+  schedules             Schedule[]
+  publications          WordPressPost[]
+
+  @@index([tenantId])
+}
+
+model Feed {
+  id                 String       @id @default(cuid())
+  tenantId           String
+  siteId             String
+  name               String
+  rssUrl             String
+  wordpressCategory  String?
+  status             FeedStatus   @default(ACTIVE)
+  autopublish        Boolean      @default(false)
+  readFrequency      String       @default("30m")
+  language           String       @default("pt-BR")
+  niche              String?
+  customPrompt       String?
+  maxPostsPerRun     Int          @default(5)
+  ignoreDuplicates   Boolean      @default(true)
+  importFeaturedImage Boolean     @default(true)
+  lastRunAt          DateTime?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  tenant             Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site               Site         @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  rawNews            RawNews[]
+  posts              Post[]
+  schedules          Schedule[]
+  logs               ExecutionLog[]
+
+  @@index([tenantId])
+  @@index([siteId])
+  @@unique([tenantId, rssUrl])
+}
+
+model RawNews {
+  id             String    @id @default(cuid())
+  tenantId       String
+  feedId         String
+  title          String
+  summary        String?
+  content        String?
+  imageUrl       String?
+  author         String?
+  publishedAt    DateTime?
+  originalUrl    String
+  contentHash    String
+  createdAt      DateTime  @default(now())
+  tenant         Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  feed           Feed      @relation(fields: [feedId], references: [id], onDelete: Cascade)
+  post           Post?
+
+  @@unique([tenantId, originalUrl])
+  @@unique([tenantId, contentHash])
+  @@index([feedId])
+}
+
+model Post {
+  id                    String         @id @default(cuid())
+  tenantId              String
+  siteId                String
+  feedId                String?
+  rawNewsId             String?        @unique
+  title                 String
+  slug                  String
+  summary               String?
+  contentHtml           String?
+  metaTitle             String?
+  metaDescription       String?
+  tags                  String[]
+  keywords              String[]
+  category              String?
+  featuredImageUrl      String?
+  featuredImageAlt      String?
+  socialSummary         String?
+  schemaJson            Json?
+  status                PostStatus     @default(DRAFT)
+  sourceUrl             String?
+  publishedAt           DateTime?
+  importedAt            DateTime       @default(now())
+  errorMessage          String?
+  generationDurationMs  Int?
+  wordpressPostId       Int?
+  wordpressPostUrl      String?
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  tenant                Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site                  Site           @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  feed                  Feed?          @relation(fields: [feedId], references: [id], onDelete: SetNull)
+  rawNews               RawNews?       @relation(fields: [rawNewsId], references: [id], onDelete: SetNull)
+  publication           WordPressPost?
+  logs                  ExecutionLog[]
+  images                ImageAsset[]
+
+  @@index([tenantId, status])
+  @@index([siteId])
+  @@index([feedId])
+}
+
+model Schedule {
+  id              String            @id @default(cuid())
+  tenantId        String
+  siteId          String
+  feedId          String
+  frequency       ScheduleFrequency @default(MINUTES)
+  intervalMinutes Int?
+  fixedTime       String?
+  weekdays        String[]
+  maxPostsPerRun  Int               @default(5)
+  active          Boolean           @default(true)
+  lastRunAt       DateTime?
+  nextRunAt       DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  tenant          Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site            Site              @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  feed            Feed              @relation(fields: [feedId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, active])
+  @@index([feedId])
+}
+
+model AiConfig {
+  id                 String     @id @default(cuid())
+  tenantId           String
+  provider           AiProvider @default(OPENAI)
+  encryptedApiKey    String
+  model              String
+  temperature        Float      @default(0.7)
+  maxArticleLength   Int        @default(5000)
+  toneOfVoice        String     @default("Jornalistico profissional")
+  language           String     @default("pt-BR")
+  globalPrompt       String
+  active             Boolean    @default(true)
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  tenant             Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, active])
+}
+
+model PromptTemplate {
+  id        String   @id @default(cuid())
+  tenantId  String
+  siteId    String?
+  feedId    String?
+  name      String
+  scope     String
+  content   String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, scope])
+}
+
+model WordPressPost {
+  id            String   @id @default(cuid())
+  siteId        String
+  postId        String   @unique
+  wordpressId   Int
+  wordpressUrl  String
+  status        String
+  payload       Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  site          Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  post          Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+}
+
+model ImageAsset {
+  id        String   @id @default(cuid())
+  postId    String
+  source    String
+  url       String
+  altText   String?
+  fileName  String?
+  createdAt DateTime @default(now())
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+}
+
+model ExecutionLog {
+  id        String   @id @default(cuid())
+  tenantId  String
+  type      LogType  @default(INFO)
+  feedId    String?
+  postId    String?
+  message   String
+  stack     String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  feed      Feed?    @relation(fields: [feedId], references: [id], onDelete: SetNull)
+  post      Post?    @relation(fields: [postId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, type])
+  @@index([feedId])
+  @@index([postId])
+}
+
+model AccessLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  ip        String?
+  userAgent String?
+  path      String
+  method    String
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+}
+
+model Subscription {
+  id             String             @id @default(cuid())
+  tenantId       String
+  userId         String
+  plan           String
+  status         SubscriptionStatus @default(ACTIVE)
+  startsAt       DateTime           @default(now())
+  expiresAt      DateTime?
+  siteLimit      Int                @default(1)
+  feedLimit      Int                @default(5)
+  monthlyPostLimit Int              @default(200)
+  metadata       Json?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  tenant         Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+}
